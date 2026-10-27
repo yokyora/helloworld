@@ -28,6 +28,7 @@ export function errorMessage(error: unknown): string {
   return "操作未完成，请重试或重新启动桌宠。";
 }
 export const core = {
+  shell: (mode: "idle" | "menu" | "panel") => invoke<void>("set_shell_mode", { mode }),
   snapshot: () => invoke<Snapshot>("get_snapshot"),
   pet: (pet: PetState) => invoke<Snapshot>("set_pet_state", { ...pet }),
   settings: (input: SettingsInput) => invoke<Snapshot>("save_settings", { input }),

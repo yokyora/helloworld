@@ -12,9 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "helloword-tauri",
-        "width": 800,
-        "height": 600
+        "title": "Hello World",
+        "width": 180,
+        "height": 180,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "resizable": false
       }
     ],
     "security": {

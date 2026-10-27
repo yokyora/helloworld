@@ -4,6 +4,7 @@ mod domain;
 mod provider;
 mod secrets;
 mod storage;
+mod window_shell;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -28,7 +29,7 @@ pub fn run() {
             }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message])
+        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message,window_shell::set_shell_mode])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
