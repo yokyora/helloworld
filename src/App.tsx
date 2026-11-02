@@ -4,6 +4,7 @@ import { core, errorMessage, native } from "./core";
 import { useCompanion } from "./useCompanion";
 import { ChatPanel } from "./ChatPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { Live2DPet } from "./Live2DPet";
 import "./App.css";
 
 type View = "idle" | "menu" | "chat" | "privacy" | "settings";
@@ -124,7 +125,7 @@ function App() {
         onPointerUp={() => { gesture.current = null; }}
         onPointerCancel={() => { gesture.current = null; dragged.current = true; }}
         onClick={(event) => { if (event.detail !== 0 && dragged.current) return; poke(); void show(view === "idle" ? "menu" : "idle"); }}>
-        <span className="pet-body" aria-hidden="true"><span className="pet-face"><i /><i /></span><span className="pet-cheeks" /></span>
+        <Live2DPet />
       </button>
     </section>
   </main>;
