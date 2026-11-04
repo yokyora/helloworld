@@ -97,7 +97,6 @@ export function PetWindow() {
       {petLoad === "error" && <button className="pet-retry" onClick={() => {
         setPetLoad("loading"); setAttempt((old) => old + 1);
       }}>重新加载角色</button>}
-      {petLoad === "ready" && (resting || quiet) && <span className="pet-mode" aria-hidden="true">{resting ? "休息中 · Zzz" : "勿扰中"}</span>}
     </section>
   </main>;
 }

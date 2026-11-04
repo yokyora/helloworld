@@ -68,7 +68,8 @@ async fn apply(window: &WebviewWindow, scales: DisplayScale, previous: DisplaySc
             app.state::<Mutex<ShellState>>().lock().map_err(window_error)?.scaling = true;
             let result = update();
             app.state::<Mutex<ShellState>>().lock().map_err(window_error)?.scaling = false;
-            result
+            result?;
+            crate::bubble::refresh(&app)
         })();
         let _ = done.send(outcome);
     }).map_err(window_error)?;

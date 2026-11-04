@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::{Emitter, State, WebviewWindow, ipc::Channel};
+use tauri::{Emitter, Manager, State, WebviewWindow, ipc::Channel};
 use crate::{application::{Application,access}, domain::*};
 
 fn main_window(window: &WebviewWindow) -> Result<(),AppError> {
@@ -15,8 +15,11 @@ async fn pet_status(app: &Arc<Application>) -> Result<PetStatus, AppError> {
         pet: PetState { resting: c.resting, quiet: c.store.quiet()? }, sending: c.active.is_some() })).await
 }
 
-async fn notify_pet(window: &WebviewWindow, app: &Arc<Application>) -> Result<(), AppError> {
-    window.emit_to("pet", "pet-status", pet_status(app).await?)
+async fn notify_pet(window: &WebviewWindow, app: &Arc<Application>, reply: Option<(u64,&str)>) -> Result<(), AppError> {
+    let status = pet_status(app).await?;
+    let reply = reply.filter(|(revision,_)| *revision == status.revision).map(|(_,text)| text);
+    crate::bubble::sync(window.app_handle(),status.revision,status.pet.resting,status.pet.quiet,status.sending,reply)?;
+    window.emit_to("pet", "pet-status", status)
         .map_err(|_| AppError::new("window", "角色状态同步失败，请重新打开桌宠。"))
 }
 
@@ -43,7 +46,7 @@ pub async fn set_pet_state(window: WebviewWindow, app: State<'_,Arc<Application>
         if resting { if let Some(a) = &c.active { a.cancel.cancel(); } }
         c.snapshot()
     }).await?;
-    notify_pet(&window, &app).await?;
+    notify_pet(&window, &app, None).await?;
     Ok(snapshot)
 }
 #[tauri::command]
@@ -55,7 +58,9 @@ pub async fn cancel_reply(window: WebviewWindow, app: State<'_,Arc<Application>>
 #[tauri::command]
 pub async fn clear_conversation(window: WebviewWindow, app: State<'_,Arc<Application>>) -> Result<Snapshot,AppError> {
     main_window(&window)?;
-    access(&app,|c| {c.ensure_idle()?;c.store.clear()?;c.revision+=1;c.snapshot()}).await
+    let snapshot = access(&app,|c| {c.ensure_idle()?;c.store.clear()?;c.revision+=1;c.snapshot()}).await?;
+    notify_pet(&window,&app,None).await?;
+    Ok(snapshot)
 }
 #[tauri::command]
 pub async fn send_message(window: WebviewWindow, app: State<'_,Arc<Application>>, request_id: String, text: String, on_delta: Channel<Delta>) -> Result<Snapshot,AppError> {
@@ -63,7 +68,7 @@ pub async fn send_message(window: WebviewWindow, app: State<'_,Arc<Application>>
     let id = request_id.clone();
     let (request,cancel) = access(&app,move |c| c.prepare(id,text.trim().to_owned())).await?;
     // UI synchronization must not leave a prepared reply pending if an event fails.
-    if let Err(error) = notify_pet(&window, &app).await { eprintln!("{}", error.message); }
+    if let Err(error) = notify_pet(&window, &app, None).await { eprintln!("{}", error.message); }
     let mut output = String::new();
     let result = app.provider.stream(request,cancel, &mut |text| {
         output.push_str(text);
@@ -71,7 +76,8 @@ pub async fn send_message(window: WebviewWindow, app: State<'_,Arc<Application>>
     }).await;
     let stored_result = result.clone();
     let snapshot = access(&app,move |c| c.finish(&request_id,&output,&stored_result)).await?;
-    if let Err(error) = notify_pet(&window, &app).await { eprintln!("{}", error.message); }
+    let reply = snapshot.turns.last().filter(|turn| turn.status == "complete").map(|turn| (snapshot.revision,turn.assistant_text.as_str()));
+    if let Err(error) = notify_pet(&window, &app, reply).await { eprintln!("{}", error.message); }
     result?;
     Ok(snapshot)
 }
