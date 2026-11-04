@@ -8,6 +8,8 @@ On 2026-10-26 the user selected remote DeepSeek API integration, with credential
 
 See [中文说明](README-zh.md) for the scope, setup, build commands, and verification limitations.
 
+Before contributing, read the [collaboration guidelines](CONTRIBUTING.md) and [Agent instructions](AGENTS.md).
+
 The idle window now shows only the character (180 × 180 logical pixels). Click or right-click the character for shortcuts, then open chat or settings as needed. Drag the character to move it; click the character again or press Escape to collapse. Native shadows remain disabled. Chat drafts survive panel changes; collapsing does not cancel a reply. The 2026-10-27 UI checks did not call or test the model.
 
 ```sh
