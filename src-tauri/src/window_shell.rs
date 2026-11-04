@@ -1,6 +1,8 @@
 use crate::domain::AppError;
 use serde::Deserialize;
-use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::WebviewWindow;
+#[cfg(not(windows))]
+use tauri::{PhysicalPosition, PhysicalSize};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -19,6 +21,16 @@ fn anchored_position(old: (i32, i32, u32, u32), size: (u32, u32), area: (i32, i3
 #[tauri::command]
 pub async fn set_shell_mode(window: WebviewWindow, mode: ShellMode) -> Result<(), AppError> {
     if window.label() != "main" { return Err(AppError::new("permission", "此窗口不能改变桌宠布局。")); }
+    let (done, result) = tokio::sync::oneshot::channel();
+    let target = window.clone();
+    window.run_on_main_thread(move || {
+        // Return after native geometry is applied, not merely queued.
+        let _ = done.send(apply_shell_mode(&target, mode));
+    }).map_err(|_| AppError::new("window", "无法调整桌宠窗口，请重试。"))?;
+    result.await.map_err(|_| AppError::new("window", "窗口调整未完成，请重试。"))?
+}
+
+fn apply_shell_mode(window: &WebviewWindow, mode: ShellMode) -> Result<(), AppError> {
     let failure = |_| AppError::new("window", "窗口大小调整失败，请重试。 ");
     let scale = window.scale_factor().map_err(failure)?;
     let old_pos = window.outer_position().map_err(failure)?;
@@ -31,10 +43,25 @@ pub async fn set_shell_mode(window: WebviewWindow, mode: ShellMode) -> Result<()
     let size = (size.0.min(area.size.width), size.1.min(area.size.height));
     let pos = anchored_position((old_pos.x, old_pos.y, old_size.width, old_size.height), size,
         (area.position.x, area.position.y, area.size.width, area.size.height));
-    window.set_size(PhysicalSize::new(size.0, size.1)).map_err(failure)?;
-    if let Err(error) = window.set_position(PhysicalPosition::new(pos.0, pos.1)) {
-        let _ = window.set_size(old_size);
-        return Err(failure(error));
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+        let hwnd = window.hwnd().map_err(failure)?;
+        // The shell is borderless: its client and outer sizes are equal.
+        // Changing size and position together avoids an intermediate shifted character.
+        let ok = unsafe {
+            SetWindowPos(hwnd.0 as _, std::ptr::null_mut(), pos.0, pos.1,
+                size.0 as i32, size.1 as i32, SWP_NOACTIVATE | SWP_NOZORDER)
+        };
+        if ok == 0 { return Err(AppError::new("window", "窗口大小与位置调整失败，请重试。")); }
+    }
+    #[cfg(not(windows))]
+    {
+        window.set_size(PhysicalSize::new(size.0, size.1)).map_err(failure)?;
+        if let Err(error) = window.set_position(PhysicalPosition::new(pos.0, pos.1)) {
+            let _ = window.set_size(old_size);
+            return Err(failure(error));
+        }
     }
     Ok(())
 }
