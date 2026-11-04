@@ -13,7 +13,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window("pet") {
                 let _ = window.show(); let _ = window.unminimize(); let _ = window.set_focus();
             }
         }))
@@ -27,9 +27,33 @@ pub fn run() {
                 core: Mutex::new(application::Core {store,resting:false,active:None,revision:0,early_cancels:Default::default()}),
                 provider: Box::new(provider),
             }));
+            app.manage(Mutex::new(window_shell::ShellState::default()));
+            tauri::WebviewWindowBuilder::new(app, "pet", tauri::WebviewUrl::App("index.html".into()))
+                .title("Hello World · 桌宠").inner_size(180.0, 180.0)
+                .transparent(true).decorations(false).shadow(false)
+                .always_on_top(true).resizable(false).build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message,window_shell::set_shell_mode])
+        .on_window_event(|window, event| {
+            if window.label() == "pet" && matches!(event, tauri::WindowEvent::Moved(_)) {
+                let visible = window.state::<Mutex<window_shell::ShellState>>().lock()
+                    .expect("shell state lock poisoned").mode != window_shell::ShellMode::Idle;
+                if visible {
+                    if let Err(error) = window_shell::apply_mode(window.app_handle(), window_shell::ShellMode::Idle) {
+                        eprintln!("{}", error.message);
+                    }
+                }
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    if let Err(error) = window_shell::apply_mode(window.app_handle(), window_shell::ShellMode::Idle) {
+                        eprintln!("{}", error.message);
+                    }
+                } else if window.label() == "pet" { window.app_handle().exit(0); }
+            }
+        })
+        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::get_pet_status,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message,window_shell::set_shell_mode,window_shell::panel_ready,window_shell::shell_action])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

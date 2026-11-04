@@ -1,6 +1,8 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 
 export interface PetState { resting: boolean; quiet: boolean }
+export type ShellView = "idle" | "menu" | "chat" | "settings" | "privacy";
+export interface PetStatus { revision: number; pet: PetState; sending: boolean }
 export interface Settings { model: string; hasApiKey: boolean; allowRemote: boolean }
 export interface Turn {
   id: string;
@@ -28,7 +30,10 @@ export function errorMessage(error: unknown): string {
   return "操作未完成，请重试或重新启动桌宠。";
 }
 export const core = {
-  shell: (mode: "idle" | "menu" | "panel") => invoke<void>("set_shell_mode", { mode }),
+  shell: (mode: ShellView) => invoke<void>("set_shell_mode", { mode }),
+  panelReady: () => invoke<void>("panel_ready"),
+  shellAction: (action: "minimize" | "exit") => invoke<void>("shell_action", { action }),
+  petStatus: () => invoke<PetStatus>("get_pet_status"),
   snapshot: () => invoke<Snapshot>("get_snapshot"),
   pet: (pet: PetState) => invoke<Snapshot>("set_pet_state", { ...pet }),
   settings: (input: SettingsInput) => invoke<Snapshot>("save_settings", { input }),

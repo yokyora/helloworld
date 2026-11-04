@@ -1,84 +1,135 @@
 use crate::domain::AppError;
-use serde::Deserialize;
-use tauri::WebviewWindow;
-#[cfg(not(windows))]
-use tauri::{PhysicalPosition, PhysicalSize};
+use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum ShellMode { Idle, Menu, Panel }
+pub enum ShellMode { #[default] Idle, Menu, Chat, Settings, Privacy }
 
-// Keep the character at the bottom centre; only move it when a screen edge
-// would otherwise hide the expanded controls. All geometry here is physical.
-fn anchored_position(old: (i32, i32, u32, u32), size: (u32, u32), area: (i32, i32, u32, u32)) -> (i32, i32) {
-    let x = old.0 as i64 + (old.2 as i64 - size.0 as i64) / 2;
-    let y = old.1 as i64 + old.3 as i64 - size.1 as i64;
-    let max_x = area.0 as i64 + area.2.saturating_sub(size.0) as i64;
-    let max_y = area.1 as i64 + area.3.saturating_sub(size.1) as i64;
-    (x.clamp(area.0 as i64, max_x) as i32, y.clamp(area.1 as i64, max_y) as i32)
+#[derive(Default)]
+pub struct ShellState { pub mode: ShellMode, pub ready: bool }
+
+// Only the panel is placed/clamped. The pet's screen rectangle is read-only.
+fn panel_position(pet: (i32, i32, u32, u32), size: (u32, u32), area: (i32, i32, u32, u32), gap: i32) -> (i32, i32) {
+    let (x, y, w, h) = (pet.0 as i64, pet.1 as i64, pet.2 as i64, pet.3 as i64);
+    let (pw, ph, gap) = (size.0 as i64, size.1 as i64, gap as i64);
+    let (left, top) = (area.0 as i64, area.1 as i64);
+    let (right, bottom) = (left + area.2 as i64, top + area.3 as i64);
+    let centred = x + (w - pw) / 2;
+    let preferred = if y - gap - ph >= top { (centred, y - gap - ph) }
+        else if y + h + gap + ph <= bottom { (centred, y + h + gap) }
+        else if x + w + gap + pw <= right { (x + w + gap, y) }
+        else if x - gap - pw >= left { (x - gap - pw, y) }
+        else { (centred, y - gap - ph) };
+    (preferred.0.clamp(left, (right - pw).max(left)) as i32,
+     preferred.1.clamp(top, (bottom - ph).max(top)) as i32)
 }
 
-#[tauri::command]
-pub async fn set_shell_mode(window: WebviewWindow, mode: ShellMode) -> Result<(), AppError> {
-    if window.label() != "main" { return Err(AppError::new("permission", "此窗口不能改变桌宠布局。")); }
-    let (done, result) = tokio::sync::oneshot::channel();
-    let target = window.clone();
-    window.run_on_main_thread(move || {
-        // Return after native geometry is applied, not merely queued.
-        let _ = done.send(apply_shell_mode(&target, mode));
-    }).map_err(|_| AppError::new("window", "无法调整桌宠窗口，请重试。"))?;
-    result.await.map_err(|_| AppError::new("window", "窗口调整未完成，请重试。"))?
-}
+fn failure(_: impl std::fmt::Display) -> AppError { AppError::new("window", "面板操作未完成，请重试。") }
 
-fn apply_shell_mode(window: &WebviewWindow, mode: ShellMode) -> Result<(), AppError> {
-    let failure = |_| AppError::new("window", "窗口大小调整失败，请重试。 ");
-    let scale = window.scale_factor().map_err(failure)?;
-    let old_pos = window.outer_position().map_err(failure)?;
-    let old_size = window.inner_size().map_err(failure)?;
-    let monitor = window.current_monitor().map_err(failure)?
-        .ok_or_else(|| AppError::new("window", "暂时无法确定桌宠所在屏幕。"))?;
-    let area = monitor.work_area();
-    let (width, height) = match mode { ShellMode::Idle => (180.0, 180.0), ShellMode::Menu => (300.0, 360.0), ShellMode::Panel => (440.0, 560.0) };
-    let size = ((width * scale).round() as u32, (height * scale).round() as u32);
-    let size = (size.0.min(area.size.width), size.1.min(area.size.height));
-    let pos = anchored_position((old_pos.x, old_pos.y, old_size.width, old_size.height), size,
-        (area.position.x, area.position.y, area.size.width, area.size.height));
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
-        let hwnd = window.hwnd().map_err(failure)?;
-        // The shell is borderless: its client and outer sizes are equal.
-        // Changing size and position together avoids an intermediate shifted character.
-        let ok = unsafe {
-            SetWindowPos(hwnd.0 as _, std::ptr::null_mut(), pos.0, pos.1,
-                size.0 as i32, size.1 as i32, SWP_NOACTIVATE | SWP_NOZORDER)
-        };
-        if ok == 0 { return Err(AppError::new("window", "窗口大小与位置调整失败，请重试。")); }
-    }
-    #[cfg(not(windows))]
-    {
-        window.set_size(PhysicalSize::new(size.0, size.1)).map_err(failure)?;
-        if let Err(error) = window.set_position(PhysicalPosition::new(pos.0, pos.1)) {
-            let _ = window.set_size(old_size);
-            return Err(failure(error));
+pub fn apply_mode(app: &AppHandle, mode: ShellMode) -> Result<(), AppError> {
+    let panel = app.get_webview_window("main").ok_or_else(|| failure("panel"))?;
+    let pet = app.get_webview_window("pet").ok_or_else(|| failure("pet"))?;
+    let before = (pet.outer_position().map_err(failure)?, pet.inner_size().map_err(failure)?);
+    let ready = app.state::<Mutex<ShellState>>().lock().map_err(failure)?.ready;
+    if mode == ShellMode::Idle {
+        panel.hide().map_err(failure)?;
+    } else if ready {
+        let monitor = pet.current_monitor().map_err(failure)?.ok_or_else(|| failure("monitor"))?;
+        let area = monitor.work_area();
+        let scale = pet.scale_factor().map_err(failure)?;
+        let logical = if mode == ShellMode::Menu { (300.0, 180.0) } else { (440.0, 380.0) };
+        let size = (((logical.0 * scale).round() as u32).min(area.size.width),
+                    ((logical.1 * scale).round() as u32).min(area.size.height));
+        let pos = panel_position((before.0.x, before.0.y, before.1.width, before.1.height), size,
+            (area.position.x, area.position.y, area.size.width, area.size.height), (6.0 * scale).round() as i32);
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER, SWP_NOCOPYBITS};
+            let hwnd = panel.hwnd().map_err(failure)?;
+            let ok = unsafe { SetWindowPos(hwnd.0 as _, std::ptr::null_mut(), pos.0, pos.1,
+                size.0 as i32, size.1 as i32, SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOCOPYBITS) };
+            if ok == 0 { return Err(failure("SetWindowPos")); }
         }
+        #[cfg(not(windows))]
+        {
+            panel.set_size(tauri::PhysicalSize::new(size.0, size.1)).map_err(failure)?;
+            panel.set_position(tauri::PhysicalPosition::new(pos.0, pos.1)).map_err(failure)?;
+        }
+        panel.show().map_err(failure)?;
+        panel.set_focus().map_err(failure)?;
+    }
+    app.state::<Mutex<ShellState>>().lock().map_err(failure)?.mode = mode;
+    app.emit_to("main", "shell-view", mode).map_err(failure)?;
+    app.emit_to("pet", "shell-view", mode).map_err(failure)?;
+    #[cfg(debug_assertions)]
+    {
+        let after = (pet.outer_position().map_err(failure)?, pet.inner_size().map_err(failure)?);
+        eprintln!("shell-transition {mode:?}: pet_before={before:?} pet_after={after:?}");
+        debug_assert_eq!(before, after, "Panel transitions must never move or resize the pet");
     }
     Ok(())
 }
 
+#[tauri::command]
+pub async fn set_shell_mode(window: WebviewWindow, mode: ShellMode) -> Result<(), AppError> {
+    if window.label() != "main" && window.label() != "pet" {
+        return Err(AppError::new("permission", "此窗口不能改变桌宠布局。"));
+    }
+    let (done, result) = tokio::sync::oneshot::channel();
+    let app = window.app_handle().clone();
+    window.run_on_main_thread(move || { let _ = done.send(apply_mode(&app, mode)); }).map_err(failure)?;
+    result.await.map_err(failure)?
+}
+
+#[tauri::command]
+pub async fn panel_ready(window: WebviewWindow) -> Result<(), AppError> {
+    if window.label() != "main" { return Err(AppError::new("permission", "此窗口不是面板。")); }
+    let (done, result) = tokio::sync::oneshot::channel();
+    let app = window.app_handle().clone();
+    window.run_on_main_thread(move || {
+        let ready = || -> Result<(), AppError> {
+            let mode = {
+                let state = app.state::<Mutex<ShellState>>();
+                let mut state = state.lock().map_err(failure)?;
+                state.ready = true;
+                state.mode
+            };
+            apply_mode(&app, mode)
+        };
+        let _ = done.send(ready());
+    }).map_err(failure)?;
+    result.await.map_err(failure)?
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShellAction { Minimize, Exit }
+
+#[tauri::command]
+pub async fn shell_action(window: WebviewWindow, action: ShellAction) -> Result<(), AppError> {
+    if window.label() != "main" { return Err(AppError::new("permission", "此窗口不能执行此操作。")); }
+    set_shell_mode(window.clone(), ShellMode::Idle).await?;
+    match action {
+        ShellAction::Minimize => window.app_handle().get_webview_window("pet").ok_or_else(|| failure("pet"))?.minimize().map_err(failure),
+        ShellAction::Exit => { window.app_handle().exit(0); Ok(()) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::anchored_position;
+    use super::panel_position;
     #[test]
-    fn expanding_and_collapsing_preserve_character_anchor() {
-        let area = (0, 0, 1920, 1040);
-        let expanded = anchored_position((800, 800, 180, 180), (440, 560), area);
-        assert_eq!(expanded, (670, 420));
-        assert_eq!(anchored_position((expanded.0, expanded.1, 440, 560), (180, 180), area), (800, 800));
+    fn places_panel_above_or_below_without_changing_pet() {
+        assert_eq!(panel_position((800, 800, 180, 180), (440, 380), (0, 0, 1920, 1040), 6), (670, 414));
+        assert_eq!(panel_position((800, 0, 180, 180), (440, 380), (0, 0, 1920, 1040), 6), (670, 186));
     }
     #[test]
-    fn clamps_to_work_area_including_negative_monitor_coordinates() {
-        assert_eq!(anchored_position((-1900, 20, 270, 270), (660, 840), (-1920, 0, 1920, 1040)), (-1920, 0));
-        assert_eq!(anchored_position((1810, 980, 180, 180), (440, 560), (0, 0, 1920, 1040)), (1480, 480));
+    fn handles_edges_negative_coordinates_and_small_work_areas() {
+        assert_eq!(panel_position((-1920, 0, 180, 180), (440, 380), (-1920, 0, 1920, 1040), 6), (-1920, 186));
+        assert_eq!(panel_position((1740, 860, 180, 180), (440, 380), (0, 0, 1920, 1040), 6), (1480, 474));
+        assert_eq!(panel_position((0, 150, 180, 180), (440, 380), (0, 0, 1920, 480), 6), (186, 100));
+        assert_eq!(panel_position((0, 0, 180, 180), (300, 200), (0, 0, 300, 200), 6), (0, 0));
     }
 }

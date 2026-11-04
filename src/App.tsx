@@ -1,39 +1,37 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { core, errorMessage, native } from "./core";
+import { core, errorMessage, native, type ShellView } from "./core";
+import { listen } from "@tauri-apps/api/event";
 import { useCompanion } from "./useCompanion";
 import { ChatPanel } from "./ChatPanel";
 import { SettingsPanel } from "./SettingsPanel";
-import { Live2DPet, type PetLoadStatus } from "./Live2DPet";
+
 import "./App.css";
 
-type View = "idle" | "menu" | "chat" | "privacy" | "settings";
+type View = ShellView;
 
 function App() {
   const app = useCompanion();
   const { resting, quiet } = app.snapshot.pet;
-  const [poked, setPoked] = useState(false);
-  const [petLoad, setPetLoad] = useState<PetLoadStatus>("loading");
-  const [petAttempt, setPetAttempt] = useState(0);
-  const [view, setView] = useState<View>("idle");
+  const [view, setView] = useState<View>("menu");
   const [resizing, setResizing] = useState(false);
   const transition = useRef(false);
-  const petButton = useRef<HTMLButtonElement>(null);
   const surface = useRef<HTMLElement>(null);
-  const gesture = useRef<{ x: number; y: number } | null>(null);
-  const dragged = useRef(false);
-  const pokeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const still = !app.ready || resting || quiet;
   const expanded = view !== "idle" && view !== "menu";
   const status = !app.ready ? "等待本地数据" : resting ? "休息中" : app.sending ? "正在回复" : quiet ? "勿扰中" : "待机中";
 
-  useEffect(() => () => { if (pokeTimer.current !== null) clearTimeout(pokeTimer.current); }, []);
   useEffect(() => {
-    if (still) {
-      if (pokeTimer.current !== null) clearTimeout(pokeTimer.current);
-      setPoked(false);
-    }
-  }, [still]);
+    if (!native) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      const stop = await listen<View>("shell-view", (event) => { if (!disposed) setView(event.payload); });
+      if (disposed) { stop(); return; }
+      unlisten = stop;
+      await core.panelReady();
+    })().catch((error) => { if (!disposed) app.setError(errorMessage(error)); });
+    return () => { disposed = true; unlisten?.(); };
+  }, [app.setError]);
   useEffect(() => {
     // Do not take keyboard focus at startup. Returning from a panel restores it.
     if (view !== "idle") surface.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
@@ -43,21 +41,16 @@ function App() {
     if (transition.current || next === view) return;
     transition.current = true; setResizing(true);
     try {
-      if (native) await core.shell(next === "idle" || next === "menu" ? next : "panel");
-      setView(next);
-      if (next === "idle") petButton.current?.focus({ preventScroll: true });
+      if (native) await core.shell(next);
+      else setView(next);
     } catch (error) { app.setError(errorMessage(error)); }
     finally { transition.current = false; setResizing(false); }
   }
-  function poke() {
-    if (still) return;
-    if (pokeTimer.current !== null) clearTimeout(pokeTimer.current);
-    setPoked(true);
-    pokeTimer.current = setTimeout(() => setPoked(false), 1400);
-  }
   async function windowAction(action: "startDragging" | "minimize" | "close") {
-    try { await getCurrentWindow()[action](); }
-    catch { app.setError("窗口操作未完成，请重试。也可按 Alt + F4 退出桌宠。"); }
+    try {
+      if (action === "startDragging") await getCurrentWindow().startDragging();
+      else await core.shellAction(action === "close" ? "exit" : "minimize");
+    } catch (error) { app.setError(errorMessage(error)); }
   }
   const controls = <>
     <button disabled={resizing} aria-pressed={view === "chat"} onClick={() => void show("chat")}>聊天</button>
@@ -65,11 +58,11 @@ function App() {
     <button disabled={resizing} aria-pressed={view === "privacy"} onClick={() => void show("privacy")}>隐私</button>
   </>;
 
-  return <main className={`companion view-${view} ${still ? "is-still" : ""} ${expanded ? "panel-open" : ""}`}
+  return <main className={`companion detached-panel view-${view} ${expanded ? "panel-open" : ""}`}
     onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); void show("idle"); } }}>
     <section className="shell-surface" ref={surface} hidden={view === "idle"} aria-label={view === "menu" ? "桌宠快捷入口" : "桌宠面板"}>
       <header className="window-bar">
-        <button className="drag-handle" aria-label="拖动桌宠窗口" disabled={!native || resizing}
+        <button className="drag-handle" aria-label="拖动面板" disabled={!native || resizing}
           onPointerDown={(event) => { if (event.button === 0 && native) void windowAction("startDragging"); }}>
           <span className="brand-mark" aria-hidden="true">✳</span> {status}
         </button>
@@ -105,34 +98,6 @@ function App() {
       </div>
       {app.error && <p className="error" role="alert">{app.error}</p>}
       {!app.ready && <button className="text-button" onClick={() => void app.refresh()}>重试读取本地数据</button>}
-    </section>
-    {view === "idle" && app.error && <button className="idle-error" onClick={() => void show("menu")}>操作未完成 · 点此查看</button>}
-    <section className="pet-space" aria-label="桌宠互动">
-      <button ref={petButton} className={`pet ${poked ? "is-poked" : ""} ${resting ? "is-resting" : ""}`}
-        aria-label={`${status}，${view === "idle" ? "点击打开快捷入口" : "点击收起面板"}，按住拖动可移动`}
-        title="点击打开或收起 · 按住拖动" aria-expanded={view !== "idle"}
-        onContextMenu={(event) => { event.preventDefault(); void show("menu"); }}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          dragged.current = false; gesture.current = { x: event.clientX, y: event.clientY };
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          const start = gesture.current;
-          if (!start || !native || resizing || Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
-          gesture.current = null; dragged.current = true;
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-          void windowAction("startDragging");
-        }}
-        onPointerUp={() => { gesture.current = null; }}
-        onPointerCancel={() => { gesture.current = null; dragged.current = true; }}
-        onClick={(event) => { if (event.detail !== 0 && dragged.current) return; poke(); void show(view === "idle" ? "menu" : "idle"); }}>
-        <Live2DPet key={petAttempt} paused={still} resting={resting} poked={poked} onStatusChange={setPetLoad} />
-      </button>
-      {petLoad === "error" && <button className="pet-retry" onClick={() => {
-        setPetLoad("loading"); setPetAttempt((attempt) => attempt + 1);
-      }}>重新加载角色</button>}
-      {petLoad === "ready" && (resting || quiet) && <span className="pet-mode" aria-hidden="true">{resting ? "休息中 · Zzz" : "勿扰中"}</span>}
     </section>
   </main>;
 }

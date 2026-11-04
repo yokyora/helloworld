@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "Hello World",
-        "width": 180,
-        "height": 180,
+        "title": "Hello World · 面板",
+        "width": 440,
+        "height": 380,
+        "visible": false,
+        "skipTaskbar": true,
         "transparent": true,
         "decorations": false,
         "shadow": false,

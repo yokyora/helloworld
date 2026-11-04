@@ -13,6 +13,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:disabled { cursor: default; }
 .companion { position: relative; width: 100%; height: 100%; }
 .shell-surface { position: absolute; inset: 6px 10px 180px; padding: 0 16px 10px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; overflow: auto; scrollbar-width: thin; }
+.detached-panel .shell-surface { inset: 6px 10px; }
 .window-bar { display: flex; align-items: center; justify-content: space-between; height: 42px; gap: 8px; flex-shrink: 0; }
 .drag-handle { flex: 1; text-align: left; background: none; border: 0; padding: 6px 0; font-size: 12px; color: var(--muted); cursor: grab; touch-action: none; }
 .brand-mark { font-size: 20px; color: var(--accent); vertical-align: middle; margin-right: 5px; }
