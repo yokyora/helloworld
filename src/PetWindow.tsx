@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { core, errorMessage, type PetStatus, type ShellView } from "./core";
+import { core, errorMessage, type ModelLayout, type PetStatus, type ShellView } from "./core";
 import { Live2DPet, type PetLoadStatus } from "./Live2DPet";
 import "./App.css";
 
@@ -12,13 +12,16 @@ export function PetWindow() {
   const [poked, setPoked] = useState(false);
   const [petLoad, setPetLoad] = useState<PetLoadStatus>("loading");
   const [attempt, setAttempt] = useState(0);
+  const [layout, setLayout] = useState<ModelLayout | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [savingAnchor, setSavingAnchor] = useState(false);
   const gesture = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
   const transition = useRef(false);
   const pokeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resting = status?.pet.resting ?? false;
   const quiet = status?.pet.quiet ?? false;
-  const still = !status || resting || quiet;
+  const still = !status || resting || quiet || calibrating;
   const label = !status ? "等待本地数据" : resting ? "休息中" : status.sending ? "正在回复" : quiet ? "勿扰中" : "待机中";
 
   useEffect(() => {
@@ -34,10 +37,17 @@ export function PetWindow() {
       const viewStop = await listen<ShellView>("shell-view", (event) => { if (!disposed) setView(event.payload); });
       if (disposed) { viewStop(); return; }
       stops.push(viewStop);
+      const calibrationStop = await listen<boolean>("calibration-mode", (event) => { if (!disposed) setCalibrating(event.payload); });
+      if (disposed) { calibrationStop(); return; }
+      stops.push(calibrationStop);
       accept(await core.petStatus());
     })().catch((e) => { if (!disposed) setError(errorMessage(e)); });
     return () => { disposed = true; stops.forEach((stop) => stop()); };
   }, []);
+  useEffect(() => {
+    if (!layout) return;
+    void core.registerBubbleModel(layout).catch((e) => setError(errorMessage(e)));
+  }, [layout]);
 
   useEffect(() => () => { if (pokeTimer.current !== null) clearTimeout(pokeTimer.current); }, []);
   useEffect(() => {
@@ -64,9 +74,16 @@ export function PetWindow() {
     try { await getCurrentWindow().startDragging(); }
     catch (e) { setError(errorMessage(e)); }
   }
+  async function finishCalibration(point: { x: number; y: number } | null) {
+    if (savingAnchor) return;
+    setSavingAnchor(true);
+    try { await core.finishBubbleCalibration(point); setError(""); }
+    catch (e) { setError(errorMessage(e)); }
+    finally { setSavingAnchor(false); }
+  }
 
   return <main className="companion" onKeyDown={(event) => {
-    if (event.key === "Escape") { event.preventDefault(); void show("idle"); }
+    if (event.key === "Escape") { event.preventDefault(); if (calibrating) void finishCalibration(null); else void show("idle"); }
   }}>
     {error && <button className="idle-error" onClick={() => void show("menu")}>{error}</button>}
     <section className="pet-space" aria-label="桌宠互动">
@@ -92,8 +109,17 @@ export function PetWindow() {
           if (event.detail !== 0 && dragged.current) return;
           poke(); void show(view === "idle" ? "menu" : "idle");
         }}>
-        <Live2DPet key={attempt} paused={still} resting={resting} poked={poked} onStatusChange={setPetLoad} />
+        <Live2DPet key={attempt} paused={still} resting={resting} poked={poked} onStatusChange={setPetLoad} onLayout={setLayout} />
       </button>
+      {calibrating && <>
+        <button autoFocus className="anchor-picker" aria-label="点击角色嘴部设置气泡锚点" disabled={savingAnchor} onContextMenu={(event) => event.preventDefault()} onClick={(event) => {
+          if (!layout) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          void finishCalibration({ x: ((event.clientX - rect.left) / rect.width - layout.x) / layout.width,
+            y: ((event.clientY - rect.top) / rect.height - layout.y) / layout.height });
+        }} />
+        <div className="anchor-hint">点击角色嘴部设置气泡位置<button onClick={() => void finishCalibration(null)} disabled={savingAnchor}>取消 · Esc</button></div>
+      </>}
       {petLoad === "error" && <button className="pet-retry" onClick={() => {
         setPetLoad("loading"); setAttempt((old) => old + 1);
       }}>重新加载角色</button>}

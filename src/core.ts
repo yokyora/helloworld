@@ -2,6 +2,9 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 
 export interface PetState { resting: boolean; quiet: boolean }
 export interface DisplayScale { petPercent: number; panelPercent: number }
+export interface BubbleAnchor { x: number; y: number }
+export interface ModelLayout { modelId: string; x: number; y: number; width: number; height: number; defaultAnchor: BubbleAnchor | null }
+export interface BubbleCalibration { modelReady: boolean; calibrated: boolean; active: boolean }
 export type ShellView = "idle" | "menu" | "chat" | "settings" | "privacy";
 export interface PetStatus { revision: number; pet: PetState; sending: boolean }
 export interface Settings { model: string; hasApiKey: boolean; allowRemote: boolean }
@@ -31,6 +34,10 @@ export function errorMessage(error: unknown): string {
   return "操作未完成，请重试或重新启动桌宠。";
 }
 export const core = {
+  registerBubbleModel: (layout: ModelLayout) => invoke<void>("register_bubble_model", { layout }),
+  bubbleCalibration: () => invoke<BubbleCalibration>("get_bubble_calibration"),
+  startBubbleCalibration: () => invoke<void>("start_bubble_calibration"),
+  finishBubbleCalibration: (point: BubbleAnchor | null) => invoke<void>("finish_bubble_calibration", { point }),
   displayScale: () => invoke<DisplayScale>("get_display_scale"),
   setDisplayScale: (scales: DisplayScale) => invoke<DisplayScale>("set_display_scale", { scales }),
   shell: (mode: ShellView) => invoke<void>("set_shell_mode", { mode }),

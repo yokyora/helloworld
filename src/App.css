@@ -37,6 +37,9 @@ button:disabled { cursor: default; }
 .bubble-reply p { -webkit-line-clamp: 4; }
 .status-bubble small { margin-top: auto; padding-top: 5px; font-size: 10px; color: var(--muted); }
 .pet:active { cursor: grabbing; }
+.anchor-picker { position: absolute; inset: 0; border: 1px dashed var(--accent); border-radius: 12px; background: transparent; cursor: crosshair; }
+.anchor-hint { position: absolute; bottom: 0; padding: 3px 5px; border-radius: 6px; background: var(--surface); color: var(--accent); font-size: 10px; text-align: center; }
+.anchor-hint button { display: block; margin: 2px auto 0; border: 0; background: transparent; font-size: 10px; text-decoration: underline; }
 .pet-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; flex-shrink: 0; }
 .pet-controls button { border: 1px solid var(--line); border-radius: 9px; background: white; padding: 7px 2px; font-size: 12px; }
 .pet-controls button:hover { border-color: var(--accent); }

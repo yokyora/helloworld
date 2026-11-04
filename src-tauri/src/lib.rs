@@ -77,7 +77,7 @@ pub fn run() {
                 } else if window.label() == "pet" { window.app_handle().exit(0); }
             }
         })
-        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::get_pet_status,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message,window_shell::set_shell_mode,window_shell::panel_ready,window_shell::shell_action,display::get_display_scale,display::set_display_scale,bubble::bubble_ready])
+        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::get_pet_status,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message,window_shell::set_shell_mode,window_shell::panel_ready,window_shell::shell_action,display::get_display_scale,display::set_display_scale,bubble::bubble_ready,bubble::register_bubble_model,bubble::get_bubble_calibration,bubble::start_bubble_calibration,bubble::finish_bubble_calibration])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

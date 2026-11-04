@@ -30,6 +30,15 @@ pub struct PetState { pub resting: bool, pub quiet: bool }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisplayScale { pub pet_percent: u16, pub panel_percent: u16 }
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BubbleAnchor { pub x: f64, pub y: f64 }
+impl BubbleAnchor {
+    pub fn validate(self) -> Result<Self, AppError> {
+        if self.x.is_finite() && self.y.is_finite() && (0.0..=1.0).contains(&self.x) && (0.0..=1.0).contains(&self.y) { Ok(self) }
+        else { Err(AppError::new("anchor", "请在角色范围内选择气泡锚点。")) }
+    }
+}
 impl Default for DisplayScale {
     fn default() -> Self { Self { pet_percent: 100, panel_percent: 100 } }
 }
