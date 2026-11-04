@@ -7,8 +7,13 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 #[serde(rename_all = "lowercase")]
 pub enum ShellMode { #[default] Idle, Menu, Chat, Settings, Privacy }
 
-#[derive(Default)]
-pub struct ShellState { pub mode: ShellMode, pub ready: bool }
+pub struct ShellState {
+    pub mode: ShellMode, pub ready: bool, pub scale_percent: u16, pub scaling: bool,
+    pub scale_position: Option<tauri::PhysicalPosition<i32>>,
+}
+impl Default for ShellState {
+    fn default() -> Self { Self { mode: ShellMode::Idle, ready: false, scale_percent: 100, scaling: false, scale_position: None } }
+}
 
 // Only the panel is placed/clamped. The pet's screen rectangle is read-only.
 fn panel_position(pet: (i32, i32, u32, u32), size: (u32, u32), area: (i32, i32, u32, u32), gap: i32) -> (i32, i32) {
@@ -32,13 +37,17 @@ pub fn apply_mode(app: &AppHandle, mode: ShellMode) -> Result<(), AppError> {
     let panel = app.get_webview_window("main").ok_or_else(|| failure("panel"))?;
     let pet = app.get_webview_window("pet").ok_or_else(|| failure("pet"))?;
     let before = (pet.outer_position().map_err(failure)?, pet.inner_size().map_err(failure)?);
-    let ready = app.state::<Mutex<ShellState>>().lock().map_err(failure)?.ready;
+    let (ready, percent) = {
+        let state = app.state::<Mutex<ShellState>>();
+        let state = state.lock().map_err(failure)?;
+        (state.ready, state.scale_percent)
+    };
     if mode == ShellMode::Idle {
         panel.hide().map_err(failure)?;
     } else if ready {
         let monitor = pet.current_monitor().map_err(failure)?.ok_or_else(|| failure("monitor"))?;
         let area = monitor.work_area();
-        let scale = pet.scale_factor().map_err(failure)?;
+        let scale = pet.scale_factor().map_err(failure)? * percent as f64 / 100.0;
         let logical = if mode == ShellMode::Menu { (300.0, 180.0) } else { (440.0, 380.0) };
         let size = (((logical.0 * scale).round() as u32).min(area.size.width),
                     ((logical.1 * scale).round() as u32).min(area.size.height));

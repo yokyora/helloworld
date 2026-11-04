@@ -30,11 +30,14 @@ export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
     let app: Application | undefined;
     let model: Live2DModel<Cubism4InternalModel> | undefined;
     let observer: ResizeObserver | undefined;
+    let densityQuery: MediaQueryList | undefined;
+    let onDensityChange: (() => void) | undefined;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const report = (next: PetLoadStatus) => { setStatus(next); onStatusChange(next); };
     const release = () => {
       playback.current = null;
       observer?.disconnect();
+      if (densityQuery && onDensityChange) densityQuery.removeEventListener("change", onDensityChange);
       app?.destroy(true, { children: true, texture: true, baseTexture: true });
       app = undefined;
       model = undefined;
@@ -125,6 +128,12 @@ export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
       fit();
       observer = new ResizeObserver(fit);
       observer.observe(host);
+      const watchDensity = () => {
+        densityQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+        densityQuery.addEventListener("change", onDensityChange!, { once: true });
+      };
+      onDensityChange = () => { fit(); watchDensity(); };
+      watchDensity();
       playback.current = syncPlayback;
       clearTimeout(timeout);
       report("ready");

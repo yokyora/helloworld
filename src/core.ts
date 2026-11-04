@@ -30,6 +30,8 @@ export function errorMessage(error: unknown): string {
   return "操作未完成，请重试或重新启动桌宠。";
 }
 export const core = {
+  displayScale: () => invoke<number>("get_display_scale"),
+  setDisplayScale: (percent: number) => invoke<number>("set_display_scale", { percent }),
   shell: (mode: ShellView) => invoke<void>("set_shell_mode", { mode }),
   panelReady: () => invoke<void>("panel_ready"),
   shellAction: (action: "minimize" | "exit") => invoke<void>("shell_action", { action }),
