@@ -4,12 +4,22 @@ import type { Cubism4InternalModel, Live2DModel } from "pixi-live2d-display/cubi
 
 export type PetLoadStatus = "loading" | "ready" | "error";
 type Props = {
+  paused: boolean;
+  resting: boolean;
+  poked: boolean;
   onStatusChange: (status: PetLoadStatus) => void;
 };
 
-export function Live2DPet({ onStatusChange }: Props) {
+export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
   const hostRef = useRef<HTMLSpanElement>(null);
+  const playback = useRef<(() => void) | null>(null);
+  const state = useRef({ paused, resting, poked });
   const [status, setStatus] = useState<PetLoadStatus>("loading");
+
+  useEffect(() => {
+    state.current = { paused, resting, poked };
+    playback.current?.();
+  }, [paused, resting, poked]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -23,6 +33,7 @@ export function Live2DPet({ onStatusChange }: Props) {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const report = (next: PetLoadStatus) => { setStatus(next); onStatusChange(next); };
     const release = () => {
+      playback.current = null;
       observer?.disconnect();
       app?.destroy(true, { children: true, texture: true, baseTexture: true });
       app = undefined;
@@ -40,7 +51,7 @@ export function Live2DPet({ onStatusChange }: Props) {
     const timeout = window.setTimeout(() => fail(new Error("模型加载超时")), 20_000);
     const syncPlayback = () => {
       if (!app || !model || disposed || failed) return;
-      const stop = reducedMotion.matches || document.hidden;
+      const stop = state.current.paused || reducedMotion.matches || document.hidden;
       app.stop();
       // Render once while paused so sleep/wake and resizing remain visible.
       model.update(1);
@@ -85,6 +96,20 @@ export function Live2DPet({ onStatusChange }: Props) {
       app.stage.addChild(model);
       // One ticker owns both rendering and animation, including physics.
       app.ticker.add(() => model?.update(app!.ticker.deltaMS), undefined, PIXI.UPDATE_PRIORITY.HIGH);
+      model.internalModel.on("beforeModelUpdate", () => {
+        const core = loaded.internalModel.coreModel;
+        if (state.current.resting) {
+          core.setParameterValueById("ParamEyeLOpen", 0);
+          core.setParameterValueById("ParamEyeROpen", 0);
+          core.setParameterValueById("ParamMouthOpenY", 0);
+        } else if (!state.current.paused && !reducedMotion.matches && state.current.poked) {
+          core.setParameterValueById("ParamCheek", 1);
+          core.setParameterValueById("ParamEyeLSmile", 1);
+          core.setParameterValueById("ParamEyeRSmile", 1);
+          core.setParameterValueById("ParamMouthForm", 1);
+          core.addParameterValueById("ParamAngleZ", -8);
+        }
+      });
       const fit = () => {
         if (!app || !model) return;
         const width = host.clientWidth;
@@ -100,6 +125,7 @@ export function Live2DPet({ onStatusChange }: Props) {
       fit();
       observer = new ResizeObserver(fit);
       observer.observe(host);
+      playback.current = syncPlayback;
       clearTimeout(timeout);
       report("ready");
     };

@@ -127,11 +127,12 @@ function App() {
         onPointerUp={() => { gesture.current = null; }}
         onPointerCancel={() => { gesture.current = null; dragged.current = true; }}
         onClick={(event) => { if (event.detail !== 0 && dragged.current) return; poke(); void show(view === "idle" ? "menu" : "idle"); }}>
-        <Live2DPet key={petAttempt} onStatusChange={setPetLoad} />
+        <Live2DPet key={petAttempt} paused={still} resting={resting} poked={poked} onStatusChange={setPetLoad} />
       </button>
       {petLoad === "error" && <button className="pet-retry" onClick={() => {
         setPetLoad("loading"); setPetAttempt((attempt) => attempt + 1);
       }}>重新加载角色</button>}
+      {petLoad === "ready" && (resting || quiet) && <span className="pet-mode" aria-hidden="true">{resting ? "休息中 · Zzz" : "勿扰中"}</span>}
     </section>
   </main>;
 }
