@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 use rusqlite::{Connection, OptionalExtension, params};
-use crate::domain::{AppError, Settings, Turn, DEFAULT_MODEL};
+use crate::domain::{AppError, DisplayScale, Settings, Turn, DEFAULT_MODEL};
 
 pub struct Store { db: Connection }
 
@@ -12,7 +12,7 @@ impl Store {
         db.busy_timeout(Duration::from_secs(3))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 2 { return Err(AppError::new("schema_version", "数据由更新版本创建，请使用更新的应用打开。")); }
+        if version > 3 { return Err(AppError::new("schema_version", "数据由更新版本创建，请使用更新的应用打开。")); }
         let tx = db.transaction()?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS settings (
             id INTEGER PRIMARY KEY CHECK(id=1), model TEXT NOT NULL,
@@ -26,8 +26,13 @@ impl Store {
             CREATE TABLE IF NOT EXISTS display_preferences (
                 id INTEGER PRIMARY KEY CHECK(id=1), scale_percent INTEGER NOT NULL
                 CHECK(scale_percent IN (75,100,125,150,175,200)));
-            INSERT OR IGNORE INTO display_preferences(id,scale_percent) VALUES (1,100);
-            PRAGMA user_version=2;")?;
+            INSERT OR IGNORE INTO display_preferences(id,scale_percent) VALUES (1,100);")?;
+        if version < 3 {
+            tx.execute_batch("ALTER TABLE display_preferences ADD COLUMN panel_percent INTEGER NOT NULL DEFAULT 100
+                CHECK(panel_percent IN (75,100,125,150,175,200));
+                UPDATE display_preferences SET panel_percent=scale_percent;")?;
+        }
+        tx.pragma_update(None, "user_version", 3)?;
         tx.execute("INSERT OR IGNORE INTO settings(id,model) VALUES (1,?1)", [DEFAULT_MODEL])?;
         tx.execute("UPDATE turns SET status='error' WHERE status='pending'", [])?;
         tx.commit()?;
@@ -37,11 +42,12 @@ impl Store {
         Ok(self.db.query_row("SELECT model,encrypted_key IS NOT NULL,allow_remote FROM settings WHERE id=1", [], |r| Ok(Settings {model:r.get(0)?,has_api_key:r.get(1)?,allow_remote:r.get(2)?}))?)
     }
     pub fn quiet(&self) -> Result<bool, AppError> { Ok(self.db.query_row("SELECT quiet FROM settings WHERE id=1", [], |r| r.get(0))?) }
-    pub fn display_scale(&self) -> Result<u16, AppError> {
-        Ok(self.db.query_row("SELECT scale_percent FROM display_preferences WHERE id=1", [], |r| r.get(0))?)
+    pub fn display_scale(&self) -> Result<DisplayScale, AppError> {
+        Ok(self.db.query_row("SELECT scale_percent,panel_percent FROM display_preferences WHERE id=1", [],
+            |r| Ok(DisplayScale { pet_percent: r.get(0)?, panel_percent: r.get(1)? }))?)
     }
-    pub fn save_display_scale(&self, value: u16) -> Result<(), AppError> {
-        self.db.execute("UPDATE display_preferences SET scale_percent=?1 WHERE id=1", [value])?;
+    pub fn save_display_scale(&self, value: DisplayScale) -> Result<(), AppError> {
+        self.db.execute("UPDATE display_preferences SET scale_percent=?1,panel_percent=?2 WHERE id=1", params![value.pet_percent, value.panel_percent])?;
         Ok(())
     }
     pub fn set_quiet(&self, value: bool) -> Result<(), AppError> { self.db.execute("UPDATE settings SET quiet=?1 WHERE id=1", [value])?; Ok(()) }
@@ -94,7 +100,7 @@ mod tests {
     }
     #[test]
     fn future_schema_is_rejected() {
-        let db = Connection::open_in_memory().unwrap(); db.pragma_update(None,"user_version",3).unwrap();
+        let db = Connection::open_in_memory().unwrap(); db.pragma_update(None,"user_version",4).unwrap();
         assert!(Store::initialize(db).is_err());
     }
     #[test]
@@ -115,16 +121,30 @@ mod tests {
         drop(db);
         {
             let s = Store::open(&path).unwrap();
-            assert_eq!(s.display_scale().unwrap(), 100);
+            assert_eq!(s.display_scale().unwrap(), DisplayScale::default());
             assert_eq!(s.encrypted_key().unwrap(), Some(vec![1,2,3]));
             assert!(s.settings().unwrap().allow_remote);
             assert!(s.quiet().unwrap());
             assert_eq!(s.turns().unwrap()[0].assistant_text, "原回复");
-            s.save_display_scale(150).unwrap();
-            assert!(s.save_display_scale(999).is_err());
+            s.save_display_scale(DisplayScale { pet_percent: 150, panel_percent: 75 }).unwrap();
+            assert!(s.save_display_scale(DisplayScale { pet_percent: 999, panel_percent: 75 }).is_err());
         }
         let s = Store::open(&path).unwrap();
-        assert_eq!(s.display_scale().unwrap(), 150);
+        assert_eq!(s.display_scale().unwrap(), DisplayScale { pet_percent: 150, panel_percent: 75 });
         assert_eq!(s.turns().unwrap().len(), 1);
+    }
+    #[test]
+    fn version_two_scale_is_preserved_for_both_windows() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE display_preferences(id INTEGER PRIMARY KEY, scale_percent INTEGER NOT NULL);
+            INSERT INTO display_preferences VALUES(1,150); PRAGMA user_version=2;").unwrap();
+        let s = Store::initialize(db).unwrap();
+        assert_eq!(s.display_scale().unwrap(), DisplayScale { pet_percent: 150, panel_percent: 150 });
+        s.save_display_scale(DisplayScale { pet_percent: 200, panel_percent: 150 }).unwrap();
+        assert_eq!(s.display_scale().unwrap().panel_percent, 150);
+        s.save_display_scale(DisplayScale { pet_percent: 200, panel_percent: 75 }).unwrap();
+        assert_eq!(s.display_scale().unwrap().pet_percent, 200);
+        let s = Store::initialize(s.db).unwrap();
+        assert_eq!(s.display_scale().unwrap(), DisplayScale { pet_percent: 200, panel_percent: 75 });
     }
 }

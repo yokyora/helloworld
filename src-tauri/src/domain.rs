@@ -27,6 +27,13 @@ impl From<rusqlite::Error> for AppError {
 #[serde(rename_all = "camelCase")]
 pub struct PetState { pub resting: bool, pub quiet: bool }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DisplayScale { pub pet_percent: u16, pub panel_percent: u16 }
+impl Default for DisplayScale {
+    fn default() -> Self { Self { pet_percent: 100, panel_percent: 100 } }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {

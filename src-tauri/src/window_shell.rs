@@ -1,4 +1,4 @@
-use crate::domain::AppError;
+use crate::domain::{AppError, DisplayScale};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
@@ -8,11 +8,11 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 pub enum ShellMode { #[default] Idle, Menu, Chat, Settings, Privacy }
 
 pub struct ShellState {
-    pub mode: ShellMode, pub ready: bool, pub scale_percent: u16, pub scaling: bool,
+    pub mode: ShellMode, pub ready: bool, pub scales: DisplayScale, pub scaling: bool,
     pub scale_position: Option<tauri::PhysicalPosition<i32>>,
 }
 impl Default for ShellState {
-    fn default() -> Self { Self { mode: ShellMode::Idle, ready: false, scale_percent: 100, scaling: false, scale_position: None } }
+    fn default() -> Self { Self { mode: ShellMode::Idle, ready: false, scales: DisplayScale::default(), scaling: false, scale_position: None } }
 }
 
 // Only the panel is placed/clamped. The pet's screen rectangle is read-only.
@@ -40,7 +40,7 @@ pub fn apply_mode(app: &AppHandle, mode: ShellMode) -> Result<(), AppError> {
     let (ready, percent) = {
         let state = app.state::<Mutex<ShellState>>();
         let state = state.lock().map_err(failure)?;
-        (state.ready, state.scale_percent)
+        (state.ready, state.scales.panel_percent)
     };
     if mode == ShellMode::Idle {
         panel.hide().map_err(failure)?;

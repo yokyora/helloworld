@@ -23,20 +23,20 @@ pub fn run() {
             std::fs::create_dir_all(&directory)?;
             let store = storage::Store::open(&directory.join("companion.sqlite3"))
                 .map_err(|e| std::io::Error::other(e.message))?;
-            let scale_percent = store.display_scale().map_err(|e| std::io::Error::other(e.message))?;
-            let zoom = scale_percent as f64 / 100.0;
+            let scales = store.display_scale().map_err(|e| std::io::Error::other(e.message))?;
+            let zoom = scales.pet_percent as f64 / 100.0;
             let provider = provider::DeepSeek::new().map_err(|e| std::io::Error::other(e.message))?;
             app.manage(Arc::new(application::Application {
                 core: Mutex::new(application::Core {store,resting:false,active:None,revision:0,early_cancels:Default::default()}),
                 provider: Box::new(provider),
             }));
-            app.manage(Mutex::new(window_shell::ShellState { scale_percent, ..Default::default() }));
+            app.manage(Mutex::new(window_shell::ShellState { scales, ..Default::default() }));
             let pet = tauri::WebviewWindowBuilder::new(app, "pet", tauri::WebviewUrl::App("index.html".into()))
                 .title("Hello World · 桌宠").inner_size(180.0 * zoom, 180.0 * zoom).visible(false)
                 .transparent(true).decorations(false).shadow(false)
                 .always_on_top(true).resizable(false).build()?;
             pet.set_zoom(zoom)?;
-            app.get_webview_window("main").expect("main panel missing").set_zoom(zoom)?;
+            app.get_webview_window("main").expect("main panel missing").set_zoom(scales.panel_percent as f64 / 100.0)?;
             pet.show()?;
             Ok(())
         })
