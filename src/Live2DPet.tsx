@@ -13,6 +13,9 @@ export function Live2DPet() {
 
     const boot = async () => {
       const PIXI = await import("pixi.js");
+      const { install } = await import("@pixi/unsafe-eval");
+      // Replaces generated shader functions; CSP still forbids eval.
+      install(PIXI);
       const { Live2DModel } = await import("pixi-live2d-display/cubism4");
       if (disposed) return;
 
@@ -23,7 +26,6 @@ export function Live2DPet() {
         view: canvas,
         width: host.clientWidth,
         height: host.clientHeight,
-        transparent: true,
         backgroundAlpha: 0,
         antialias: true,
         autoDensity: true,
