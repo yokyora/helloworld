@@ -8,7 +8,7 @@ use crate::{application::{access,Application}, domain::{AppError,BubbleAnchor}, 
 pub struct Content { revision: u64, text: String, reply: bool, left: bool }
 #[derive(Clone,Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
-pub struct ModelLayout { pub model_id: String, pub x: f64, pub y: f64, pub width: f64, pub height: f64, pub default_anchor: Option<BubbleAnchor> }
+pub struct ModelLayout { pub selection_id: String, pub selection_revision: u64, pub model_id: String, pub x: f64, pub y: f64, pub width: f64, pub height: f64, pub default_anchor: Option<BubbleAnchor> }
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Calibration { model_ready: bool, calibrated: bool, active: bool }
@@ -128,6 +128,13 @@ fn notify_calibration(app: &AppHandle) -> Result<(),AppError> {
     app.emit_to("pet","calibration-mode",status.active).map_err(failure)?;
     app.emit_to("main","bubble-calibration",status).map_err(failure)
 }
+pub fn clear_model(app: &AppHandle) -> Result<(),AppError> {
+    let state = app.state::<Mutex<BubbleState>>();
+    let mut state = state.lock().map_err(failure)?;
+    state.model = None; state.anchor = None; state.calibrating = false;
+    Ok(())
+}
+pub fn selection_changed(app: &AppHandle) -> Result<(),AppError> { notify_calibration(app)?; refresh(app) }
 async fn update_ui(window: &WebviewWindow, show_settings: bool) -> Result<(),AppError> {
     let app = window.app_handle().clone();
     let (done,result) = tokio::sync::oneshot::channel();
@@ -150,11 +157,16 @@ pub async fn register_bubble_model(window: WebviewWindow, app: tauri::State<'_,A
     let id = layout.model_id.clone();
     let saved = access(&app,move |c| c.store.bubble_anchor(&id)).await?;
     {
+        let library = window.state::<crate::models::Library>();
+        let current = library.selection.lock().map_err(failure)?;
+        if current.id != layout.selection_id || current.revision != layout.selection_revision { return Ok(()); }
         let state = window.state::<Mutex<BubbleState>>();
         let mut state = state.lock().map_err(failure)?;
         if state.model.as_ref().map(|m| &m.model_id) != Some(&layout.model_id) {
             state.anchor = saved.or(layout.default_anchor);
             state.calibrating = false;
+            #[cfg(debug_assertions)]
+            eprintln!("bubble-model: id={} saved={} anchor={:?}",layout.model_id,saved.is_some(),state.anchor);
         }
         state.model = Some(layout);
     }
@@ -248,7 +260,7 @@ mod tests {
     }
     #[test]
     fn model_space_anchor_maps_through_fitted_canvas() {
-        let model = ModelLayout {model_id:"test".into(),x:0.25,y:0.04,width:0.5,height:0.92,default_anchor:None};
+        let model = ModelLayout {selection_id:"test".into(),selection_revision:0,model_id:"test".into(),x:0.25,y:0.04,width:0.5,height:0.92,default_anchor:None};
         let point = map_anchor(&model,BubbleAnchor{x:0.6,y:0.25});
         assert!((point.x-0.55).abs()<1e-10);
         assert!((point.y-0.27).abs()<1e-10);

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { native, type Settings, type SettingsInput } from "./core";
 import { DisplaySettings } from "./DisplaySettings";
+import { ModelSettings } from "./ModelSettings";
 
 export function SettingsPanel({ settings, disabled, onSave }: { settings: Settings; disabled: boolean; onSave: (input: SettingsInput) => Promise<boolean> }) {
   const [model, setModel] = useState(settings.model);
@@ -9,6 +10,7 @@ export function SettingsPanel({ settings, disabled, onSave }: { settings: Settin
   const [allow, setAllow] = useState(settings.allowRemote);
   const [saved, setSaved] = useState(false);
   return <section id="settings-panel" className="detail-panel" aria-labelledby="settings-title">
+    <ModelSettings />
     <DisplaySettings />
     <h1 id="settings-title">连接 DeepSeek</h1>
     <p>仅连接 api.deepseek.com。保存设置不会发送聊天请求。</p>

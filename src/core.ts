@@ -3,7 +3,10 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 export interface PetState { resting: boolean; quiet: boolean }
 export interface DisplayScale { petPercent: number; panelPercent: number }
 export interface BubbleAnchor { x: number; y: number }
-export interface ModelLayout { modelId: string; x: number; y: number; width: number; height: number; defaultAnchor: BubbleAnchor | null }
+export interface ModelSelection { id: string; revision: number }
+export interface ModelEntry { id: string; name: string }
+export interface ModelCatalog { models: ModelEntry[]; selected: ModelSelection }
+export interface ModelLayout { selectionId: string; selectionRevision: number; modelId: string; x: number; y: number; width: number; height: number; defaultAnchor: BubbleAnchor | null }
 export interface BubbleCalibration { modelReady: boolean; calibrated: boolean; active: boolean }
 export type ShellView = "idle" | "menu" | "chat" | "settings" | "privacy";
 export interface PetStatus { revision: number; pet: PetState; sending: boolean }
@@ -34,6 +37,10 @@ export function errorMessage(error: unknown): string {
   return "操作未完成，请重试或重新启动桌宠。";
 }
 export const core = {
+  live2dCatalog: () => invoke<ModelCatalog>("get_live2d_catalog"),
+  selectedLive2d: () => invoke<ModelSelection>("get_selected_live2d"),
+  importLive2d: () => invoke<ModelEntry | null>("import_live2d"),
+  selectLive2d: (id: string) => invoke<ModelSelection>("select_live2d", { id }),
   registerBubbleModel: (layout: ModelLayout) => invoke<void>("register_bubble_model", { layout }),
   bubbleCalibration: () => invoke<BubbleCalibration>("get_bubble_calibration"),
   startBubbleCalibration: () => invoke<void>("start_bubble_calibration"),

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { Application } from "pixi.js";
 import type { Cubism4InternalModel, Live2DModel } from "pixi-live2d-display/cubism4";
-import type { ModelLayout } from "./core";
+import type { ModelLayout, ModelSelection } from "./core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export type PetLoadStatus = "loading" | "ready" | "error";
 type Props = {
+  selection: ModelSelection;
   paused: boolean;
   resting: boolean;
   poked: boolean;
@@ -12,7 +14,7 @@ type Props = {
   onLayout: (layout: ModelLayout) => void;
 };
 
-export function Live2DPet({ paused, resting, poked, onStatusChange, onLayout }: Props) {
+export function Live2DPet({ selection, paused, resting, poked, onStatusChange, onLayout }: Props) {
   const hostRef = useRef<HTMLSpanElement>(null);
   const playback = useRef<(() => void) | null>(null);
   const state = useRef({ paused, resting, poked });
@@ -90,11 +92,12 @@ export function Live2DPet({ paused, resting, poked, onStatusChange, onLayout }: 
       host.appendChild(app.view);
 
       let modelId = "";
+      const source = selection.id === "builtin-atri" ? "/live2d/atri/model.json" : `${convertFileSrc(selection.id, "petmodel")}/model.json`;
       // Hash the already-loaded moc bytes: replacing a model at the same path
       // must not reuse the previous character's calibration.
       const identify: typeof Live2DLoader.middlewares[number] = async (context, next) => {
         await next();
-        if (context.type === "arraybuffer" && context.settings && context.url === context.settings.moc) {
+        if (context.type === "arraybuffer" && context.settings?.url === source && context.url === context.settings.moc) {
           const hash = await crypto.subtle.digest("SHA-256", context.result);
           modelId = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
         }
@@ -102,7 +105,7 @@ export function Live2DPet({ paused, resting, poked, onStatusChange, onLayout }: 
       Live2DLoader.middlewares.unshift(identify);
       let loaded: Live2DModel<Cubism4InternalModel>;
       try {
-        loaded = await Live2DModel.from("/live2d/atri/model.json", { autoUpdate: false, autoInteract: false }) as Live2DModel<Cubism4InternalModel>;
+        loaded = await Live2DModel.from(source, { autoUpdate: false, autoInteract: false }) as Live2DModel<Cubism4InternalModel>;
       } finally {
         const index = Live2DLoader.middlewares.indexOf(identify);
         if (index >= 0) Live2DLoader.middlewares.splice(index, 1);
@@ -150,7 +153,7 @@ export function Live2DPet({ paused, resting, poked, onStatusChange, onLayout }: 
         model.position.set(width / 2, height / 2);
         const fitWidth = model.internalModel.width * scale / width;
         const fitHeight = model.internalModel.height * scale / height;
-        onLayout({ modelId, x: (1 - fitWidth) / 2, y: (1 - fitHeight) / 2, width: fitWidth, height: fitHeight, defaultAnchor });
+        onLayout({ selectionId: selection.id, selectionRevision: selection.revision, modelId, x: (1 - fitWidth) / 2, y: (1 - fitHeight) / 2, width: fitWidth, height: fitHeight, defaultAnchor });
         syncPlayback();
       };
       fit();
@@ -175,7 +178,7 @@ export function Live2DPet({ paused, resting, poked, onStatusChange, onLayout }: 
       reducedMotion.removeEventListener("change", onVisibilityChange);
       release();
     };
-  }, [onStatusChange, onLayout]);
+  }, [selection, onStatusChange, onLayout]);
 
   return <>
     <span className="live2d-pet" ref={hostRef} aria-hidden="true" />

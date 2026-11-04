@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { core, errorMessage, type ModelLayout, type PetStatus, type ShellView } from "./core";
+import { core, errorMessage, type ModelLayout, type ModelSelection, type PetStatus, type ShellView } from "./core";
 import { Live2DPet, type PetLoadStatus } from "./Live2DPet";
 import "./App.css";
 
@@ -13,6 +13,7 @@ export function PetWindow() {
   const [petLoad, setPetLoad] = useState<PetLoadStatus>("loading");
   const [attempt, setAttempt] = useState(0);
   const [layout, setLayout] = useState<ModelLayout | null>(null);
+  const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [calibrating, setCalibrating] = useState(false);
   const [savingAnchor, setSavingAnchor] = useState(false);
   const gesture = useRef<{ x: number; y: number } | null>(null);
@@ -44,6 +45,21 @@ export function PetWindow() {
     })().catch((e) => { if (!disposed) setError(errorMessage(e)); });
     return () => { disposed = true; stops.forEach((stop) => stop()); };
   }, []);
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const accept = (next: ModelSelection) => {
+      if (!disposed) setSelection((old) => !old || next.revision > old.revision ? next : old);
+    };
+    void (async () => {
+      const unlisten = await listen<ModelSelection>("model-selection", ({ payload }) => accept(payload));
+      if (disposed) { unlisten(); return; }
+      stop = unlisten;
+      accept(await core.selectedLive2d());
+    })().catch((e) => { if (!disposed) setError(errorMessage(e)); });
+    return () => { disposed = true; stop?.(); };
+  }, []);
+  useEffect(() => { setLayout(null); setCalibrating(false); setPetLoad("loading"); setError(""); }, [selection]);
   useEffect(() => {
     if (!layout) return;
     void core.registerBubbleModel(layout).catch((e) => setError(errorMessage(e)));
@@ -109,7 +125,7 @@ export function PetWindow() {
           if (event.detail !== 0 && dragged.current) return;
           poke(); void show(view === "idle" ? "menu" : "idle");
         }}>
-        <Live2DPet key={attempt} paused={still} resting={resting} poked={poked} onStatusChange={setPetLoad} onLayout={setLayout} />
+        {selection && <Live2DPet key={`${selection.revision}:${attempt}`} selection={selection} paused={still} resting={resting} poked={poked} onStatusChange={setPetLoad} onLayout={setLayout} />}
       </button>
       {calibrating && <>
         <button autoFocus className="anchor-picker" aria-label="点击角色嘴部设置气泡锚点" disabled={savingAnchor} onContextMenu={(event) => event.preventDefault()} onClick={(event) => {

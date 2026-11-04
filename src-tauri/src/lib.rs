@@ -7,6 +7,7 @@ mod storage;
 mod window_shell;
 mod display;
 mod bubble;
+mod models;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -14,6 +15,17 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("petmodel", |context, request, responder| {
+            let root = context.app_handle().state::<models::Library>().root.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let response = match models::asset(&root, request.uri().path()) {
+                    Ok((bytes, mime)) => tauri::http::Response::builder().status(200).header("Content-Type",mime)
+                        .header("Access-Control-Allow-Origin","*").header("X-Content-Type-Options","nosniff").body(bytes),
+                    Err(_) => tauri::http::Response::builder().status(404).header("Access-Control-Allow-Origin","*").body(Vec::new()),
+                };
+                responder.respond(response.expect("static response headers"));
+            });
+        })
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("pet") {
                 let _ = window.show(); let _ = window.unminimize(); let _ = window.set_focus();
@@ -27,6 +39,8 @@ pub fn run() {
                 .map_err(|e| std::io::Error::other(e.message))?;
             let scales = store.display_scale().map_err(|e| std::io::Error::other(e.message))?;
             let quiet = store.quiet().map_err(|e| std::io::Error::other(e.message))?;
+            let selected = store.selected_live2d().map_err(|e| std::io::Error::other(e.message))?;
+            app.manage(models::Library {root:directory.join("models"),selection:Mutex::new(models::Selection{id:selected,revision:0})});
             let zoom = scales.pet_percent as f64 / 100.0;
             let provider = provider::DeepSeek::new().map_err(|e| std::io::Error::other(e.message))?;
             app.manage(Arc::new(application::Application {
@@ -77,7 +91,7 @@ pub fn run() {
                 } else if window.label() == "pet" { window.app_handle().exit(0); }
             }
         })
-        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::get_pet_status,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message,window_shell::set_shell_mode,window_shell::panel_ready,window_shell::shell_action,display::get_display_scale,display::set_display_scale,bubble::bubble_ready,bubble::register_bubble_model,bubble::get_bubble_calibration,bubble::start_bubble_calibration,bubble::finish_bubble_calibration])
+        .invoke_handler(tauri::generate_handler![commands::get_snapshot,commands::get_pet_status,commands::save_settings,commands::set_pet_state,commands::cancel_reply,commands::clear_conversation,commands::send_message,window_shell::set_shell_mode,window_shell::panel_ready,window_shell::shell_action,display::get_display_scale,display::set_display_scale,bubble::bubble_ready,bubble::register_bubble_model,bubble::get_bubble_calibration,bubble::start_bubble_calibration,bubble::finish_bubble_calibration,models::import_live2d,models::get_live2d_catalog,models::get_selected_live2d,models::select_live2d])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
