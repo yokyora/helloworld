@@ -1,15 +1,56 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Application } from "pixi.js";
+import type { Cubism4InternalModel, Live2DModel } from "pixi-live2d-display/cubism4";
 
-export function Live2DPet() {
-  const hostRef = useRef<HTMLDivElement>(null);
+export type PetLoadStatus = "loading" | "ready" | "error";
+type Props = {
+  onStatusChange: (status: PetLoadStatus) => void;
+};
+
+export function Live2DPet({ onStatusChange }: Props) {
+  const hostRef = useRef<HTMLSpanElement>(null);
+  const [status, setStatus] = useState<PetLoadStatus>("loading");
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
     let disposed = false;
-    let app: import("pixi.js").Application | undefined;
+    let failed = false;
+    let app: Application | undefined;
+    let model: Live2DModel<Cubism4InternalModel> | undefined;
     let observer: ResizeObserver | undefined;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const report = (next: PetLoadStatus) => { setStatus(next); onStatusChange(next); };
+    const release = () => {
+      observer?.disconnect();
+      app?.destroy(true, { children: true, texture: true, baseTexture: true });
+      app = undefined;
+      model = undefined;
+    };
+    const fail = (error: unknown) => {
+      if (disposed || failed) return;
+      failed = true;
+      clearTimeout(timeout);
+      console.error("Live2D 加载失败", error);
+      release();
+      report("error");
+    };
+    // A stalled request must not leave an invisible or permanently loading pet.
+    const timeout = window.setTimeout(() => fail(new Error("模型加载超时")), 20_000);
+    const syncPlayback = () => {
+      if (!app || !model || disposed || failed) return;
+      const stop = reducedMotion.matches || document.hidden;
+      app.stop();
+      // Render once while paused so sleep/wake and resizing remain visible.
+      model.update(1);
+      app.render();
+      if (!stop) app.start();
+    };
+    const onVisibilityChange = () => syncPlayback();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    reducedMotion.addEventListener("change", onVisibilityChange);
+    report("loading");
 
     const boot = async () => {
       const PIXI = await import("pixi.js");
@@ -17,60 +58,68 @@ export function Live2DPet() {
       // Replaces generated shader functions; CSP still forbids eval.
       install(PIXI);
       const { Live2DModel } = await import("pixi-live2d-display/cubism4");
-      if (disposed) return;
+      if (disposed || failed) return;
 
-      Live2DModel.registerTicker(PIXI.Ticker);
-
-      const canvas = document.createElement("canvas");
       app = new PIXI.Application({
-        view: canvas,
         width: host.clientWidth,
         height: host.clientHeight,
         backgroundAlpha: 0,
         antialias: true,
         autoDensity: true,
+        autoStart: false,
+        sharedTicker: false,
         resolution: window.devicePixelRatio || 1,
       });
-      if (disposed) {
-        app.destroy(true, { children: true, texture: true, baseTexture: true });
-        app = undefined;
-        return;
-      }
-      host.appendChild(canvas);
+      app.ticker.maxFPS = 30;
+      host.appendChild(app.view);
 
-      const model = await Live2DModel.from("/live2d/atri/model.json");
-      if (disposed) {
-        model.destroy();
+      const loaded = await Live2DModel.from("/live2d/atri/model.json", {
+        autoUpdate: false,
+        autoInteract: false,
+      }) as Live2DModel<Cubism4InternalModel>;
+      if (disposed || failed) {
+        loaded.destroy({ children: true, texture: true, baseTexture: true });
         return;
       }
+      model = loaded;
       app.stage.addChild(model);
-
+      // One ticker owns both rendering and animation, including physics.
+      app.ticker.add(() => model?.update(app!.ticker.deltaMS), undefined, PIXI.UPDATE_PRIORITY.HIGH);
       const fit = () => {
-        if (!app) return;
+        if (!app || !model) return;
         const width = host.clientWidth;
         const height = host.clientHeight;
+        app.renderer.resolution = window.devicePixelRatio || 1;
         app.renderer.resize(width, height);
-        const baseWidth = model.internalModel.width || model.width / model.scale.x;
-        const baseHeight = model.internalModel.height || model.height / model.scale.y;
-        const scale = Math.min(width / baseWidth, height / baseHeight) * 0.92;
+        const scale = Math.min(width / model.internalModel.width, height / model.internalModel.height) * 0.92;
         model.scale.set(scale);
         model.anchor.set(0.5, 0.5);
         model.position.set(width / 2, height / 2);
+        syncPlayback();
       };
       fit();
       observer = new ResizeObserver(fit);
       observer.observe(host);
-      void model.motion("hair", 0);
+      clearTimeout(timeout);
+      report("ready");
     };
-
-    boot().catch(() => undefined);
+    void boot().catch(fail);
 
     return () => {
       disposed = true;
-      observer?.disconnect();
-      app?.destroy(true, { children: true, texture: true, baseTexture: true });
+      clearTimeout(timeout);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      reducedMotion.removeEventListener("change", onVisibilityChange);
+      release();
     };
-  }, []);
+  }, [onStatusChange]);
 
-  return <div className="live2d-pet" ref={hostRef} />;
+  return <>
+    <span className="live2d-pet" ref={hostRef} aria-hidden="true" />
+    {status !== "ready" && <span className="pet-load-status" role={status === "error" ? "alert" : "status"}>
+      <span aria-hidden="true">✳</span>
+      {status === "error" ? "角色加载失败" : "角色加载中…"}
+      <small>{status === "error" ? "可重试，或点击这里打开菜单" : "正在读取本地模型"}</small>
+    </span>}
+  </>;
 }

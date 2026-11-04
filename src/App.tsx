@@ -4,7 +4,7 @@ import { core, errorMessage, native } from "./core";
 import { useCompanion } from "./useCompanion";
 import { ChatPanel } from "./ChatPanel";
 import { SettingsPanel } from "./SettingsPanel";
-import { Live2DPet } from "./Live2DPet";
+import { Live2DPet, type PetLoadStatus } from "./Live2DPet";
 import "./App.css";
 
 type View = "idle" | "menu" | "chat" | "privacy" | "settings";
@@ -13,6 +13,8 @@ function App() {
   const app = useCompanion();
   const { resting, quiet } = app.snapshot.pet;
   const [poked, setPoked] = useState(false);
+  const [petLoad, setPetLoad] = useState<PetLoadStatus>("loading");
+  const [petAttempt, setPetAttempt] = useState(0);
   const [view, setView] = useState<View>("idle");
   const [resizing, setResizing] = useState(false);
   const transition = useRef(false);
@@ -125,8 +127,11 @@ function App() {
         onPointerUp={() => { gesture.current = null; }}
         onPointerCancel={() => { gesture.current = null; dragged.current = true; }}
         onClick={(event) => { if (event.detail !== 0 && dragged.current) return; poke(); void show(view === "idle" ? "menu" : "idle"); }}>
-        <Live2DPet />
+        <Live2DPet key={petAttempt} onStatusChange={setPetLoad} />
       </button>
+      {petLoad === "error" && <button className="pet-retry" onClick={() => {
+        setPetLoad("loading"); setPetAttempt((attempt) => attempt + 1);
+      }}>重新加载角色</button>}
     </section>
   </main>;
 }

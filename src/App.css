@@ -23,6 +23,10 @@ button:disabled { cursor: default; }
 .pet { position: relative; border: 0; background: transparent; width: 180px; height: 180px; border-radius: 0; padding: 0; touch-action: none; user-select: none; cursor: grab; }
 .live2d-pet { position: absolute; inset: 0; pointer-events: none; }
 .live2d-pet canvas { display: block; width: 100%; height: 100%; }
+.pet-load-status { position: absolute; inset: 22px 10px 38px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; font-size: 13px; }
+.pet-load-status > span { color: var(--accent); font-size: 30px; }
+.pet-load-status small { color: var(--muted); font-size: 10px; }
+.pet-retry { position: absolute; bottom: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); padding: 5px 10px; font-size: 12px; }
 .pet:active { cursor: grabbing; }
 .pet-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; flex-shrink: 0; }
 .pet-controls button { border: 1px solid var(--line); border-radius: 9px; background: white; padding: 7px 2px; font-size: 12px; }
