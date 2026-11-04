@@ -67,8 +67,12 @@ function App() {
           <span className="brand-mark" aria-hidden="true">✳</span> {status}
         </button>
         <div className="window-actions">
-          {native && <button aria-label="最小化到任务栏" onClick={() => void windowAction("minimize")}>−</button>}
-          <button aria-label="收起面板，只显示角色" title="收起 · Esc" disabled={resizing} onClick={() => void show("idle")}>⌄</button>
+          {native && <button type="button" aria-label="最小化到任务栏" title="最小化到任务栏" onClick={() => void windowAction("minimize")}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+          </button>}
+          <button type="button" aria-label="收起面板，只显示角色" title="收起面板 · Esc" disabled={resizing} onClick={() => void show("idle")}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          </button>
         </div>
       </header>
       <nav className="pet-controls" aria-label="桌宠功能">{controls}</nav>

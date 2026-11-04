@@ -17,8 +17,9 @@ button:disabled { cursor: default; }
 .window-bar { display: flex; align-items: center; justify-content: space-between; height: 42px; gap: 8px; flex-shrink: 0; }
 .drag-handle { flex: 1; text-align: left; background: none; border: 0; padding: 6px 0; font-size: 12px; color: var(--muted); cursor: grab; touch-action: none; }
 .brand-mark { font-size: 20px; color: var(--accent); vertical-align: middle; margin-right: 5px; }
-.window-actions { display: flex; gap: 4px; }
-.window-actions button { border: 0; background: transparent; font-size: 22px; width: 28px; height: 28px; border-radius: 8px; }
+.window-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.window-actions button { display: grid; place-items: center; flex: 0 0 32px; border: 0; padding: 0; background: transparent; width: 32px; height: 32px; border-radius: 8px; }
+.window-actions svg { display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .window-actions button:hover { background: #e7e9f3; }
 .pet-space { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 180px; height: 180px; display: grid; place-items: center; }
 .pet { position: relative; border: 0; background: transparent; width: 180px; height: 180px; border-radius: 0; padding: 0; touch-action: none; user-select: none; cursor: grab; }
