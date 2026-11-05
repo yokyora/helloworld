@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "Hello World",
-        "width": 180,
-        "height": 180,
+        "title": "Hello World · 面板",
+        "width": 440,
+        "height": 380,
+        "visible": false,
+        "skipTaskbar": true,
         "transparent": true,
         "decorations": false,
         "shadow": false,
@@ -23,8 +25,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-src 'none'",
-      "devCsp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://127.0.0.1:1420; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-src 'none'"
+      "csp": "default-src 'self'; connect-src 'self' http://petmodel.localhost ipc: http://ipc.localhost; img-src 'self' http://petmodel.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self'; media-src 'self' http://petmodel.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'",
+      "devCsp": "default-src 'self'; connect-src 'self' http://petmodel.localhost ipc: http://ipc.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://127.0.0.1:1420; img-src 'self' http://petmodel.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self'; media-src 'self' http://petmodel.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }
   },
   "bundle": {

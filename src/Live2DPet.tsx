@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import type { Application } from "pixi.js";
 import type { Cubism4InternalModel, Live2DModel } from "pixi-live2d-display/cubism4";
+import type { ModelLayout, ModelSelection } from "./core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export type PetLoadStatus = "loading" | "ready" | "error";
 type Props = {
+  selection: ModelSelection;
   paused: boolean;
   resting: boolean;
   poked: boolean;
   onStatusChange: (status: PetLoadStatus) => void;
+  onLayout: (layout: ModelLayout) => void;
 };
 
-export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
+export function Live2DPet({ selection, paused, resting, poked, onStatusChange, onLayout }: Props) {
   const hostRef = useRef<HTMLSpanElement>(null);
   const playback = useRef<(() => void) | null>(null);
   const state = useRef({ paused, resting, poked });
@@ -30,11 +34,14 @@ export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
     let app: Application | undefined;
     let model: Live2DModel<Cubism4InternalModel> | undefined;
     let observer: ResizeObserver | undefined;
+    let densityQuery: MediaQueryList | undefined;
+    let onDensityChange: (() => void) | undefined;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const report = (next: PetLoadStatus) => { setStatus(next); onStatusChange(next); };
     const release = () => {
       playback.current = null;
       observer?.disconnect();
+      if (densityQuery && onDensityChange) densityQuery.removeEventListener("change", onDensityChange);
       app?.destroy(true, { children: true, texture: true, baseTexture: true });
       app = undefined;
       model = undefined;
@@ -68,7 +75,7 @@ export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
       const { install } = await import("@pixi/unsafe-eval");
       // Replaces generated shader functions; CSP still forbids eval.
       install(PIXI);
-      const { Live2DModel } = await import("pixi-live2d-display/cubism4");
+      const { Live2DModel, Live2DLoader } = await import("pixi-live2d-display/cubism4");
       if (disposed || failed) return;
 
       app = new PIXI.Application({
@@ -84,15 +91,39 @@ export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
       app.ticker.maxFPS = 30;
       host.appendChild(app.view);
 
-      const loaded = await Live2DModel.from("/live2d/atri/model.json", {
-        autoUpdate: false,
-        autoInteract: false,
-      }) as Live2DModel<Cubism4InternalModel>;
+      let modelId = "";
+      const source = selection.id === "builtin-atri" ? "/live2d/atri/model.json" : `${convertFileSrc(selection.id, "petmodel")}/model.json`;
+      // Hash the already-loaded moc bytes: replacing a model at the same path
+      // must not reuse the previous character's calibration.
+      const identify: typeof Live2DLoader.middlewares[number] = async (context, next) => {
+        await next();
+        if (context.type === "arraybuffer" && context.settings?.url === source && context.url === context.settings.moc) {
+          const hash = await crypto.subtle.digest("SHA-256", context.result);
+          modelId = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+        }
+      };
+      Live2DLoader.middlewares.unshift(identify);
+      let loaded: Live2DModel<Cubism4InternalModel>;
+      try {
+        loaded = await Live2DModel.from(source, { autoUpdate: false, autoInteract: false }) as Live2DModel<Cubism4InternalModel>;
+      } finally {
+        const index = Live2DLoader.middlewares.indexOf(identify);
+        if (index >= 0) Live2DLoader.middlewares.splice(index, 1);
+      }
+      if (!modelId) { loaded.destroy({ children: true, texture: true, baseTexture: true }); throw new Error("无法识别角色模型"); }
       if (disposed || failed) {
         loaded.destroy({ children: true, texture: true, baseTexture: true });
         return;
       }
       model = loaded;
+      const head = Object.values(model.internalModel.hitAreas).find((area) => /^(head|face|hitareahead|hitareaface)$/i.test(area.name) || /^(head|face|hitareahead|hitareaface)$/i.test(area.id));
+      let defaultAnchor: ModelLayout["defaultAnchor"] = null;
+      if (head) {
+        const bounds = model.internalModel.getDrawableBounds(head.index);
+        const centre = model.internalModel.localTransform.apply({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 });
+        const point = { x: centre.x / model.internalModel.width, y: centre.y / model.internalModel.height };
+        if ([point.x, point.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) defaultAnchor = point;
+      }
       app.stage.addChild(model);
       // One ticker owns both rendering and animation, including physics.
       app.ticker.add(() => model?.update(app!.ticker.deltaMS), undefined, PIXI.UPDATE_PRIORITY.HIGH);
@@ -120,11 +151,20 @@ export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
         model.scale.set(scale);
         model.anchor.set(0.5, 0.5);
         model.position.set(width / 2, height / 2);
+        const fitWidth = model.internalModel.width * scale / width;
+        const fitHeight = model.internalModel.height * scale / height;
+        onLayout({ selectionId: selection.id, selectionRevision: selection.revision, modelId, x: (1 - fitWidth) / 2, y: (1 - fitHeight) / 2, width: fitWidth, height: fitHeight, defaultAnchor });
         syncPlayback();
       };
       fit();
       observer = new ResizeObserver(fit);
       observer.observe(host);
+      const watchDensity = () => {
+        densityQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+        densityQuery.addEventListener("change", onDensityChange!, { once: true });
+      };
+      onDensityChange = () => { fit(); watchDensity(); };
+      watchDensity();
       playback.current = syncPlayback;
       clearTimeout(timeout);
       report("ready");
@@ -138,7 +178,7 @@ export function Live2DPet({ paused, resting, poked, onStatusChange }: Props) {
       reducedMotion.removeEventListener("change", onVisibilityChange);
       release();
     };
-  }, [onStatusChange]);
+  }, [selection, onStatusChange, onLayout]);
 
   return <>
     <span className="live2d-pet" ref={hostRef} aria-hidden="true" />
